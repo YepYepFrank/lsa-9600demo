@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LSA-9600 演示</title>
+<style>
+  :root { --bg: #0c1417; --card: #121d20; --line: #22343a; --t1: #e4ecee; --t2: #8fa3a8; --acc: #14a394; }
+  * { box-sizing: border-box }
+  body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--t1); font: 14px/1.6 "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; display: flex; align-items: center; justify-content: center; padding: 24px 16px }
+  main { width: 100%; max-width: 920px }
+  h1 { font-size: 24px; margin: 0 0 4px }
+  .sub { color: var(--t2); margin: 0 0 28px }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px }
+  a.card { display: block; text-decoration: none; color: inherit; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 20px; transition: border-color .15s, transform .15s }
+  a.card:hover { border-color: var(--acc); transform: translateY(-2px) }
+  .k { font-size: 12px; color: var(--acc); letter-spacing: 1px }
+  .n { font-size: 18px; font-weight: 600; margin: 6px 0 8px }
+  .d { color: var(--t2); font-size: 13px }
+  .note { margin-top: 28px; color: var(--t2); font-size: 12px; border-top: 1px solid var(--line); padding-top: 14px }
+</style>
+</head>
+<body>
+<main>
+  <h1>LSA-9600 配电柜态势感知系统</h1>
+  <p class="sub">演示版 · 页面与真实系统相同，数据为模拟数据，不连接任何设备或服务</p>
+  <div class="grid">
+    <a class="card" href="子站/index.html">
+      <div class="k">子站一级</div>
+      <div class="n">LSA-9600SP 子站主机</div>
+      <div class="d">全站概览（三维柜面布置、负荷曲线、实时告警）、一次系统图、监视墙、柜详情（双光摄像机测温）、告警、趋势、巡检、系统管理</div>
+    </a>
+    <a class="card" href="子站/console.html">
+      <div class="k">子站一级 · 机柜双屏</div>
+      <div class="n">上屏态势 + 下屏工作</div>
+      <div class="d">模拟机柜上下两块屏的联动效果（1280×1024 / 1920×1080）</div>
+    </a>
+    <a class="card" href="EG/index.html#/overview">
+      <div class="k">EG 一级</div>
+      <div class="n">LSA-9600EG 边缘网关</div>
+      <div class="d">每柜一台的单柜监测界面：本柜总览（双光测温、温湿度与露点、局放、颗粒物、弧光）、电气量、事件与录像（告警证据回放）、设备与通信</div>
+    </a>
+  </div>
+  <p class="note">子站页面里进入「网关」→ 选一台 → 右上角「EG 管理页」，会打开对应柜的 EG 管理页演示。</p>
+</main>
+</body>
+</html>

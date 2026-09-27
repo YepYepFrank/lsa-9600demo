@@ -1,0 +1,14 @@
+diff --git a/web/src/api/mock/adapter.ts b/web/src/api/mock/adapter.ts
+index 4bf2633..ea3a4b5 100644
+--- a/web/src/api/mock/adapter.ts
++++ b/web/src/api/mock/adapter.ts
+@@ -276,7 +276,8 @@ export function createMockApi(scn: Scenario): Api {
+       return { ok: true, config: { want: e.cfgWant, status: 'APPLIED' as const, error: null, actual: e.cfgWant, appliedAt: Date.now() } }
+     },
+     // Mock 没有真实的 EG
+-    egPortal: async () => { throw new Error('模拟数据下没有真实的 EG，接真后端（?api=tb）后可用') },
++    // 演示包：打开同目录下的 EG 管理页演示版（../EG/），带上柜号与柜名
++    egPortal: async (code: string) => ({ url: `../EG/index.html?cab=${encodeURIComponent(code)}&name=${encodeURIComponent(cabBy(code)?.name ?? code)}#/overview`, role: 'maint' as const }),
+     listRules: (code: string) => RULES.map(r => ({ ...r, hit: cabBy(code)?.alarms.length ? r.hit : 0 })),
+     listPoints, subscribePoints, listOutages, listSouthStats, listEvents, series, random: R,
+     // Mock 没有抓拍图（界面画示意）

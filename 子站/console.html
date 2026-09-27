@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>LSA-9600SP 机柜双屏模拟</title>
+<style>
+  html,body{height:100%;margin:0;background:#07090a;color:#9fb0b5;font:12px/1.5 "Microsoft YaHei",system-ui,sans-serif;overflow:hidden}
+  #bar{height:34px;display:flex;align-items:center;gap:12px;padding:0 12px;background:#0f1517;border-bottom:1px solid #1e2a2e}
+  #bar{white-space:nowrap;overflow:hidden} #bar b{color:#e4ecee} #bar .sp{flex:1}
+  #bar .desc{overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+  @media (max-width:900px){#bar .desc,#bar .lb{display:none}}
+  #bar button{font:inherit;color:#cfe3e1;background:#16211f;border:1px solid #2a3b3f;border-radius:4px;height:24px;padding:0 10px;cursor:pointer}
+  #bar button.on{background:#14827a;border-color:#14827a;color:#fff}
+  #stage{position:absolute;inset:34px 0 0 0;overflow:hidden}
+  #rack{position:absolute;left:50%;top:50%;transform-origin:center center;display:flex;width:max-content;gap:26px;padding:22px 34px;background:linear-gradient(90deg,#15191b,#23292c 8%,#23292c 92%,#15191b);border-radius:6px;box-shadow:0 0 0 2px #0b0d0e,0 20px 60px #000}
+  #rack.v{flex-direction:column}
+  .mon{background:#050607;padding:12px 12px 22px;border-radius:4px;box-shadow:inset 0 0 0 2px #2e3437;position:relative}
+  .mon::after{content:attr(data-l);position:absolute;left:0;right:0;bottom:3px;text-align:center;font-size:11px;color:#6d8087;letter-spacing:.5px}
+  iframe{display:block;border:0;background:#0c1417}
+  .kb{height:26px;border-radius:3px;background:repeating-linear-gradient(90deg,#1b2023 0 14px,#121518 14px 16px);box-shadow:inset 0 0 0 2px #2e3437;display:grid;place-items:center;font-size:11px;color:#55646a}
+  #rack:not(.v) .kb{display:none}
+</style>
+</head>
+<body>
+<div id="bar"><b>LSA-9600SP 机柜双屏模拟</b><span class="desc">上屏 A = 态势屏（看） · 下屏 B = 工作屏（操作，靠近抽拉键鼠） · 两窗口经 BroadcastChannel 联动</span><span class="sp"></span>
+  <span class="lb">分辨率</span><button data-r="1280x1024" class="on">1280×1024</button><button data-r="1920x1080">1920×1080</button>
+  <span class="lb">排布</span><button data-l="v" class="on">上下</button><button data-l="h">左右</button></div>
+<div id="stage"><div id="rack" class="v">
+  <div class="mon" data-l="上屏 A · 态势屏"><iframe id="fa" src="./index.html?screen=A"></iframe></div>
+  <div class="mon" data-l="下屏 B · 工作屏"><iframe id="fb" src="./index.html?screen=B"></iframe></div>
+  <div class="kb">抽拉式键盘 / 鼠标</div>
+</div></div>
+<script>
+  let W = 1280, H = 1024; const rack = document.getElementById('rack'), st = document.getElementById('stage');
+  function fit() {
+    document.querySelectorAll('iframe').forEach(f => { f.width = W; f.height = H; });
+    const r = { width: rack.offsetWidth, height: rack.offsetHeight };
+    rack.style.transform = `translate(-50%,-50%) scale(${Math.min((st.clientWidth - 16) / r.width, (st.clientHeight - 16) / r.height, 1)})`;
+  }
+  document.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { [W, H] = b.dataset.r.split('x').map(Number); document.querySelectorAll('[data-r]').forEach(x => x.classList.toggle('on', x === b)); fit(); });
+  document.querySelectorAll('[data-l]').forEach(b => b.onclick = () => { rack.classList.toggle('v', b.dataset.l === 'v'); document.querySelectorAll('[data-l]').forEach(x => x.classList.toggle('on', x === b)); fit(); });
+  addEventListener('resize', fit); fit();
+</script>
+</body>
+</html>
