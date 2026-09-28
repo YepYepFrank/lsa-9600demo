@@ -8,4 +8,4 @@ EG：  起一个带新接口的 agent（开发机旁观实例 9101 或正常 age
       node build-eg.mjs <EG 库 apps/admin-web> 构建（注入 mock-eg.ts；双光画面换成样机真实帧、streamsOf 置空；不改 EG 库），
       再 node inline.mjs dist <演示包>/EG
 检查：node demo-check.mjs（无头 Edge：证据回放、抓帧、事件关联录像、子站跳 EG、各页无脚本错误）
-本次：子站 49cbecf（0.9.0），EG b7b1ef2（界面与 bee14c9 相同）
+本次：子站 42f5cf3（0.9.1），EG b7b1ef2（界面与 bee14c9 相同）
