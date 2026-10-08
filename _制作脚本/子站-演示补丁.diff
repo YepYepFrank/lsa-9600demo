@@ -1,9 +1,36 @@
 diff --git a/web/src/api/mock/adapter.ts b/web/src/api/mock/adapter.ts
-index 4bf2633..ea3a4b5 100644
+index ddc5be4..9721c1e 100644
 --- a/web/src/api/mock/adapter.ts
 +++ b/web/src/api/mock/adapter.ts
-@@ -276,7 +276,8 @@ export function createMockApi(scn: Scenario): Api {
+@@ -82,7 +82,8 @@ export function createMockApi(scn: Scenario): Api {
+         upKbps: nl ? null : Math.round(state === 'backfill' ? R(900, 1100) : R(180, 320)),
+         // I 阶段：各柜 EG 跑独立 TB，上送服务报版本、积压与配置下发状态
+         egMode: 'standalone' as const, tbVersion: '4.2.2.5', agentVersion: '0.4.0', oldestUnsent: null, outboxFull: false,
+-        cfgStatus: 'APPLIED' as const, cfgError: null, cfgAt: NOW - 3 * 3600e3,
++        // 演示包：未接入 / 停用的 EG 配置不下发（0.9.5「不适用」）
++        cfgStatus: (state === 'never' || state === 'disabled' ? 'NA' : 'APPLIED') as 'NA' | 'APPLIED', cfgError: null, cfgAt: NOW - 3 * 3600e3,
+         egUrl: 'http://192.168.1.' + (11 + i), egUrlSource: 'rule' as 'attr' | 'env' | 'rule',
+       },
+     }
+@@ -283,6 +284,8 @@ export function createMockApi(scn: Scenario): Api {
+     // Mock 没有 Edge：只记审计
+     pushConfig: async (code: string) => {
+       const e = cabBy(code)!.eg
++      // 演示包：未接入 / 停用的不下发（0.9.5 NA）
++      if (e.state === 'never' || e.state === 'disabled') return { ok: true, config: { want: e.cfgWant, status: 'NA' as const, error: e.state === 'never' ? '未接入' : '已停用', actual: e.cfg, appliedAt: null } }
+       await system.api.audit('下发', 'EG-' + code, `下发配置 ${e.cfgWant}：EG 已生效（与 EG 现有一致）`)
        return { ok: true, config: { want: e.cfgWant, status: 'APPLIED' as const, error: null, actual: e.cfgWant, appliedAt: Date.now() } }
+     },
+@@ -290,6 +293,7 @@ export function createMockApi(scn: Scenario): Api {
+     setEgService: async (code: string, disabled: boolean, reason: string) => {
+       const e = cabBy(code)!.eg
+       e.state = disabled ? 'disabled' : 'online'
++      e.cfgStatus = disabled ? 'NA' : 'APPLIED' // 演示包：停用不下发，取消停用后自动下发
+       e.svcReason = disabled ? reason : null
+       e.svcBy = disabled ? '演示用户' : null
+       e.svcAt = disabled ? Date.now() : null
+@@ -305,7 +309,8 @@ export function createMockApi(scn: Scenario): Api {
+       return { url: e.egUrl, source: e.egUrlSource, attr: url, env: null, rule }
      },
      // Mock 没有真实的 EG
 -    egPortal: async () => { throw new Error('模拟数据下没有真实的 EG，接真后端（?api=tb）后可用') },
@@ -12,3 +39,16 @@ index 4bf2633..ea3a4b5 100644
      listRules: (code: string) => RULES.map(r => ({ ...r, hit: cabBy(code)?.alarms.length ? r.hit : 0 })),
      listPoints, subscribePoints, listOutages, listSouthStats, listEvents, series, random: R,
      // Mock 没有抓拍图（界面画示意）
+diff --git a/web/src/api/mock/system.ts b/web/src/api/mock/system.ts
+index 3908252..fccf79d 100644
+--- a/web/src/api/mock/system.ts
++++ b/web/src/api/mock/system.ts
+@@ -136,7 +136,7 @@ export function createSystemMock(x: SystemCtx) {
+         ['业务服务 biz', '健康度、温升分析、巡检', 'ok', 6, 1.1], ['北向服务 northbound', 'Modbus TCP / HTTP 上送', 'ok', 2, 0.5], ['流媒体 ZLMediaKit', '双光视频转发', 'warn', 11, 0.9], ['Nginx', '前端与反向代理', 'ok', 0, 0.1], ['chrony', '对时', 'ok', 0, 0.02], ['NUT', 'UPS 监视', 'ok', 0, 0.02]] as [string, string, 'ok' | 'warn', number, number][])
+         .map(([name, desc, state, cpu, mem]) => ({ name, desc, state, cpu, mem, uptime: name.startsWith('流媒体') ? '2 小时（自动重启 1 次）' : '41 天' })),
+       ups: { state: '市电供电', battery: 100, load: 34, runtime: '约 46 分钟', lastTest: ymd(NOW - 18 * D) },
+-      ntp: { server: '192.168.1.1（站内时钟源）', offsetMs: 2, stratum: 3, lastSync: NOW - 38e3, egMaxOffsetMs: off.eg.offset, egMaxCab: off.code },
++      ntp: { mode: 'synced' as const, source: '192.168.1.1', server: '192.168.1.1（站内时钟源）', offsetMs: 2, stratum: 3, lastSync: NOW - 38e3, egMaxOffsetMs: off.eg.offset, egMaxCab: off.code },
+       backup: { schedule: '每日 01:30 全量 · 每小时增量（pgBackRest）', last: lastBk, lastSize: '3.8 GB', lastOk: true, target: 'HDD /backup，保留 30 天',
+         history: Array.from({ length: 6 }, (_, i) => ({ t: lastBk - i * D, size: (3.8 - i * 0.01).toFixed(2) + ' GB', ok: i !== 4, kind: '全量' })) },
+     }
