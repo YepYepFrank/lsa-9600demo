@@ -1,8 +1,17 @@
 diff --git a/web/src/api/mock/adapter.ts b/web/src/api/mock/adapter.ts
-index d476dab..a7dcacd 100644
+index d476dab..61eaa5d 100644
 --- a/web/src/api/mock/adapter.ts
 +++ b/web/src/api/mock/adapter.ts
-@@ -84,7 +84,8 @@ export function createMockApi(scn: Scenario): Api {
+@@ -2,7 +2,7 @@
+  * scenario = mixed：预埋 严重 / 异常 / 关注 / 离线 / 补传 / 降级 / 时钟异常 各一例；calm：全部正常。 */
+ import { reactive } from 'vue'
+ import { CAP_LABEL } from '@/utils/caps'
+-import type { CapKey } from '../types'
++import type { CapKey, CapState } from '../types'
+ import type { Api } from '../index'
+ import { createAlarmMock } from './alarms'
+ import { createDeviceMock } from './device'
+@@ -84,12 +84,22 @@ export function createMockApi(scn: Scenario): Api {
          upKbps: nl ? null : Math.round(state === 'backfill' ? R(900, 1100) : R(180, 320)),
          // I 阶段：各柜 EG 跑独立 TB，上送服务报版本、积压与配置下发状态
          tbVersion: '4.2.2.5', agentVersion: '0.4.0', oldestUnsent: null, outboxFull: false,
@@ -12,7 +21,30 @@ index d476dab..a7dcacd 100644
          egUrl: 'http://192.168.1.' + (11 + i), egUrlSource: 'rule' as 'attr' | 'env' | 'rule',
        },
      }
-@@ -292,6 +293,8 @@ export function createMockApi(scn: Scenario): Api {
+   }))
+   const cabBy = (code: string) => cabs.find(c => c.code === code)
++  // 演示包（0.10 / 0.13）：能力清单。地电波 / 特高频只有 AH03、AH08 装了，其余柜「不支持」；
++  // AH09 电表需量、AA05 局放类型码「待定」，「在等」列按 @lsa/model pending.ts 写 T 号与清单编号
++  const PD3 = ['AH03', 'AH08']
++  const CAP_WAIT: Record<string, [CapKey, { t: string; refs: string[]; what: string; text: string }]> = {
++    AH09: ['meterDemand', { t: 'T09', refs: ['E4'], what: '电表是否有需量', text: '等 T09 · 清单 E4' }],
++    AA05: ['pdType', { t: 'T05', refs: ['B′ us.type'], what: '局放类型码（寄存器 2 已确认，待转换程序上报）', text: '等 T05 · 清单 B′ us.type' }],
++  }
++  const capOf = (code: string, key: CapKey): CapState => (CAP_WAIT[code]?.[0] === key ? 'pending' : (key === 'tev' || key === 'uhf') && !PD3.includes(code) ? 'unsupported' : 'confirmed')
++  cabs.forEach(c => { c.caps = Object.fromEntries((Object.keys(CAP_LABEL) as CapKey[]).map(k => [k, capOf(c.code, k)]).filter(([, v]) => v !== 'confirmed')) })
+   if (mixed) cabBy('AH03')!.load = 71 // 与过温告警描述一致
+   // 同一条供电链路负荷率一致：出线柜 → 变压器 → 低压进线（低压侧略低，差值为变压器损耗）
+   ;([['AH03', 'T1', 'AA01'], ['AH08', 'T2', 'AA07']] as const).forEach(([fd, tr, lv]) => { const l = cabBy(fd)!.load; cabBy(tr)!.load = l; cabBy(lv)!.load = l == null ? null : l - 1 })
+@@ -281,7 +291,7 @@ export function createMockApi(scn: Scenario): Api {
+         onCab(r)
+       }
+       const id = 'INS' + new Date(t).toISOString().slice(2, 16).replace(/[-T:]/g, '')
+-      const run = summarize(id, t, '手动 · ' + system.api.me(), scope, Math.max(1, Math.round((Date.now() - t) / 1e3)), done)
++      const run = { ...summarize(id, t, '手动 · ' + system.api.me(), scope, Math.max(1, Math.round((Date.now() - t) / 1e3)), done), ruleVersion: 'trial-1', status: 'done' } // 演示包：试行规则版本
+       inspect.saveInspection(run)
+       system.api.audit('巡检', scope, `手动巡检完成，评分 ${run.score}，异常对象 ${run.nAbnormal} 面`)
+       return run
+@@ -292,6 +302,8 @@ export function createMockApi(scn: Scenario): Api {
      // Mock 没有 Edge：只记审计
      pushConfig: async (code: string) => {
        const e = cabBy(code)!.eg
@@ -21,7 +53,7 @@ index d476dab..a7dcacd 100644
        await system.api.audit('下发', 'EG-' + code, `下发配置 ${e.cfgWant}：EG 已生效（与 EG 现有一致）`)
        return { ok: true, config: { want: e.cfgWant, status: 'APPLIED' as const, error: null, actual: e.cfgWant, appliedAt: Date.now() } }
      },
-@@ -299,6 +302,7 @@ export function createMockApi(scn: Scenario): Api {
+@@ -299,6 +311,7 @@ export function createMockApi(scn: Scenario): Api {
      setEgService: async (code: string, disabled: boolean, reason: string) => {
        const e = cabBy(code)!.eg
        e.state = disabled ? 'disabled' : 'online'
@@ -29,7 +61,12 @@ index d476dab..a7dcacd 100644
        e.svcReason = disabled ? reason : null
        e.svcBy = disabled ? '演示用户' : null
        e.svcAt = disabled ? Date.now() : null
-@@ -336,7 +340,8 @@ export function createMockApi(scn: Scenario): Api {
+@@ -332,15 +345,17 @@ export function createMockApi(scn: Scenario): Api {
+     // 能力（阶段 A1）：Mock 是演示口径，全部已确认，不能改
+     getCapabilities: (code: string) => ({
+       cab: code, mode: 'demo' as const, actualAt: null, site: null,
+-      rows: (Object.keys(CAP_LABEL) as CapKey[]).map(key => ({ key, label: CAP_LABEL[key], state: 'confirmed' as const, source: 'model' as const, model: 'confirmed' as const, actual: null, mismatch: null })),
++      rows: (Object.keys(CAP_LABEL) as CapKey[]).map(key => ({ key, label: CAP_LABEL[key], state: capOf(code, key), source: 'model' as const, model: capOf(code, key), actual: null, mismatch: null, pending: CAP_WAIT[code]?.[0] === key ? CAP_WAIT[code][1] : null })),
      }),
      setCapabilities: async () => { throw new Error('模拟数据下不能改能力，接真后端（?api=tb）后可用') },
      // Mock 没有真实的 EG
@@ -39,11 +76,179 @@ index d476dab..a7dcacd 100644
      listRules: (code: string) => RULES.map(r => ({ ...r, hit: cabBy(code)?.alarms.length ? r.hit : 0 })),
      listPoints, subscribePoints, listOutages, listSouthStats, listEvents, series, random: R,
      // Mock 没有抓拍图（界面画示意）
+-    blob: async () => { throw new Error('Mock 没有图片') },
++    // 演示包：《104 信息点表》XLSX / CSV 在浏览器里现生成
++    blob: async (url: string) => { if (url.startsWith('/ext/north/iec104-map')) return system.api.iec104Map(url.includes('format=csv') ? 'csv' : 'xlsx'); throw new Error('Mock 没有图片') },
+     evidenceUrl: async () => { throw new Error('Mock 没有证据文件') },
+     archiveEvidence: async (id: string) => ({ evidenceId: id, status: 'UPLOADED' }),
+     lockEvidence: async () => ({ requestId: 'mock', status: 'ACCEPTED', evidenceIds: [] }),
+@@ -358,7 +373,7 @@ export function createMockApi(scn: Scenario): Api {
+ export const ASYNC_METHODS = [
+   'getAlarmEvidence', 'listSoe', 'getAlarmStats', 'getTrend', 'saveInspection', 'listInspections', 'getInspectPlan', 'setInspectPlan',
+   'listLedger', 'listDocs', 'addDoc', 'listMaint', 'addMaint', 'listNorth', 'listNorthMap', 'saveRole', 'listUsers', 'saveUser', 'getPolicy', 'savePolicy',
+-  'listStationRules', 'toggleRule', 'listThresholds', 'saveThreshold', 'getSelfMonitor', 'runBackup', 'listAudit', 'audit', 'listRules', 'listOutages',
++  'listStationRules', 'toggleRule', 'listThresholds', 'saveThreshold', 'approveThreshold', 'setNorth', 'getSelfMonitor', 'runBackup', 'listAudit', 'audit', 'listRules', 'listOutages',
+   'listSouthStats', 'listEvents', 'pushConfig', 'setEgUrl', 'setEgService', 'getCapabilities', 'setCapabilities', 'getStationLoad', 'getRiseAnalysis', 'listSnapshots', 'getPdArc', 'getEnv', 'listMeters', 'listRecordings', 'getRecording', 'getArchive',
+   'listWallSnaps', 'addWallSnap', 'getSld', 'listSldBindings', 'getTopology',
+ ] as const
+diff --git a/web/src/api/mock/alarms.ts b/web/src/api/mock/alarms.ts
+index 58687a6..d8ae113 100644
+--- a/web/src/api/mock/alarms.ts
++++ b/web/src/api/mock/alarms.ts
+@@ -39,8 +39,19 @@ export function createAlarmMock(x: AlarmCtx) {
+ 
+   const stateOf = (a: Alarm): Alarm['st'] =>
+     a.lv === 'info' ? '—' : a.recoveredAt ? (a.ackAt ? '已恢复' : '已恢复未确认') : a.ackAt ? '已确认' : '未确认'
++  // 演示包（0.10 A9）：告警代码与规则号，口径同后端 rt/alarm-codes.ts；EG 规则带配置版本
++  const CODE: Record<string, [string, string]> = { 过温: ['RISE_HIGH', 'EG-rise'], 超温: ['TEMP_ABS_HIGH', 'EG-tabs'], 绝对超温: ['TEMP_ABS_HIGH', 'EG-tabs'], 过载: ['OVERLOAD', 'EG-ol'], 局放异常: ['PD_HIGH', 'EG-pd'],
++    环境: ['RH_HIGH', 'EG-rh'], 柜内湿度高: ['RH_HIGH', 'EG-rh'], 烟气异常: ['SMOKE_HIGH', 'EG-pm'], 弧光异常: ['ARC_FLASH', 'EG-arc'], 通信中断: ['EG_COMM_LOST', 'SP-comm'], 核心部件异常: ['DEVICE_LOST', 'EG-devlost'] }
++  function codeOf(s: Seed): Pick<Alarm, 'alarmCode' | 'ruleId' | 'ruleVersion'> {
++    if (s.lv === 'info') return {}
++    const sp = s.src.startsWith('SP')
++    if (s.type === '局放异常' && sp) return { alarmCode: 'PD_TREND', ruleId: 'SP-pdtrend', ruleVersion: null }
++    const [code, rule] = (CODE[s.type] ?? ['OTHER', null]) as [string, string | null]
++    const ruleId = s.type === '过温' && s.lv === 'crit' ? 'EG-rise2' : rule
++    return { alarmCode: code, ruleId, ruleVersion: ruleId?.startsWith('EG') ? 'c-0321' : null }
++  }
+   function build(s: Seed): Alarm {
+-    const a = { ...s, arriveT: s.arriveT ?? s.t + 800, st: '—', log: [] } as Alarm
++    const a = { ...s, ...codeOf(s), arriveT: s.arriveT ?? s.t + 800, st: '—', log: [] } as Alarm
+     a.log = baseLog(a)
+     a.st = stateOf(a)
+     return a
+@@ -179,7 +190,7 @@ export function createAlarmMock(x: AlarmCtx) {
+       }
+     } else if (isLiveSeed && a.type === '弧光异常') {
+       const pa = L.getPdArc(a.cab)
+-      if (pa) { ev.pulses = pa.arcs.filter(p => p.t >= from && p.t <= to); ev.pulseLimit = pa.arcLimit; ev.panels.push({ title: '超声局放幅值（同隔室）', unit: 'dBμV', series: [{ name: room, data: cut(pa.amp[room] ?? [], a.t - 12 * H, to) }], band: { ...pa.band, label: '基线带' } }) }
++      if (pa) { ev.pulses = pa.arcs.filter(p => p.t >= from && p.t <= to); ev.pulseLimit = pa.arcLimit; ev.panels.push({ title: '超声局放幅值（同隔室）', unit: 'dBμV', series: [{ name: room, data: cut(pa.amp[room] ?? pa.amp[pa.kpi.ampRoom] ?? [], a.t - 12 * H, to) }], band: { ...pa.band, label: '基线带' } }) }
+     } else if (isLiveSeed && a.type === '局放异常') {
+       const pa = L.getPdArc(a.cab)
+       if (pa) { ev.from = NOW - 7 * D; ev.panels.push({ title: '超声局放幅值', unit: 'dBμV', weight: 1.4, series: pa.rooms.map(r => ({ name: r, data: pa.amp[r] })), band: { ...pa.band, label: '基线带（前 30 天）' }, thresholds: [{ v: pa.ampLimit, label: '告警 ' + pa.ampLimit }] }, { title: '放电次数', unit: '次/min', series: [{ name: room, data: pa.cnt[room] ?? [] }] }) }
+diff --git a/web/src/api/mock/device.ts b/web/src/api/mock/device.ts
+index 90157cc..5cd5796 100644
+--- a/web/src/api/mock/device.ts
++++ b/web/src/api/mock/device.ts
+@@ -85,7 +85,8 @@ export function createDeviceMock(x: MockCtx) {
+ 
+     const h = c.health ?? 0
+     const health7d: Sample[] = c.health == null ? [] : x.series(84, 2 * H, h + (c.alarms.length ? 14 : 0), 0, 1.4, { ramp: c.alarms.length ? -14 : 0, dp: 0 }).map(([t, v]) => [t, v == null ? null : Math.max(0, Math.min(100, v))])
+-    const d: CabDetail = { template: tpl, rooms, spots, ir, parts, health7d }
++    // 演示包（0.10 A3）：评分规则批准前按试行口径，标「试行 · 规则 trial-1」
++    const d: CabDetail = { template: tpl, rooms, spots, ir, parts, health7d, ...(c.health == null ? {} : { healthInfo: { grade: 'FULL' as const, notEvaluated: 0, ruleVersion: 'trial-1', coverage: 1, at: NOW } }) }
+     cache.set(code, d)
+     return d
+   }
+diff --git a/web/src/api/mock/inspect.ts b/web/src/api/mock/inspect.ts
+index 93f6273..d81c93d 100644
+--- a/web/src/api/mock/inspect.ts
++++ b/web/src/api/mock/inspect.ts
+@@ -109,7 +109,7 @@ export function createInspectMock(x: InspectCtx) {
+         const parts = { health: Math.min(W.health, lift(r.parts.health, W.health)), sensing: Math.min(W.sensing, lift(r.parts.sensing, W.sensing)), events: Math.min(W.events, lift(r.parts.events, W.events)), system: Math.min(W.system, lift(r.parts.system, W.system)) }
+         return { ...r, parts, score: Math.round(parts.health + parts.sensing + parts.events + parts.system), findings: i === 0 ? r.findings.filter(f => !/弧光|离线/.test(f.text)) : r.findings.slice(0, Math.round(r.findings.length * k * 0.6)) }
+       })
+-      return summarize(id, t, '定时', '全站', 38 + Math.round(rnd() * 6), cabs)
++      return { ...summarize(id, t, '定时', '全站', 38 + Math.round(rnd() * 6), cabs), ruleVersion: 'trial-1', status: 'done' } // 演示包：试行规则版本
+     })
+   }
+ 
+diff --git a/web/src/api/mock/sensing.ts b/web/src/api/mock/sensing.ts
+index b9d105b..abf0b29 100644
+--- a/web/src/api/mock/sensing.ts
++++ b/web/src/api/mock/sensing.ts
+@@ -73,11 +73,15 @@ export function createSensingMock(x: SensingCtx) {
+     records.sort((a, b) => b.t - a.t)
+ 
+     const hot = sensors[0]
++    // 演示包（0.13 I4）：AH03、AH08 装了地电波 / 特高频（dBmV，只显示不判告警，带设备判等级），其余柜只有超声
++    const pd3 = code === 'AH03' ? { room: '电缆室', tev: calm(n, step, 14.2, 0.8, 0.6), uhf: calm(n, step, 21.5, 1.2, 0.9), uhfLv: '正常' }
++      : code === 'AH08' ? { room: '断路器室', tev: calm(n, step, 11.6, 0.6, 0.5), uhf: calm(n, step, 33.8, 1.5, 1.1, 6), uhfLv: '一级' } : null
+     const hs = amp[hot.name], mean = (a: Sample[]) => a.reduce((s, p) => s + (p[1] ?? 0), 0) / a.length
+     const a24 = arcs.filter(a => NOW - a.t < D)
+     return {
+       rooms: sensors.map(r => r.name), amp, cnt, band, ampWarnLimit: 8, ampLimit: limitOr('pd', x.cabBy(code)!.group), cntLimit: 20, arcs, arcRecord: 50, arcLimit: limitOr('arc', x.cabBy(code)!.group), records,
+-      kpi: { ampNow: hot.pd ?? 0, ampRoom: hot.name, trend7d: Math.round((mean(hs.slice(-48)) / mean(hs.slice(0, 48)) - 1) * 100), cntNow: cnt[hot.name][n - 1][1] ?? 0, arc24h: a24.length, arcMax: Math.max(0, ...a24.map(a => a.v)) },
++      kpi: { ampNow: hot.pd ?? 0, ampRoom: hot.name, trend7d: Math.round((mean(hs.slice(-48)) / mean(hs.slice(0, 48)) - 1) * 100), cntNow: cnt[hot.name][n - 1][1] ?? 0, arc24h: a24.length, arcMax: Math.max(0, ...a24.map(a => a.v)), ...(pd3 ? { tevNow: pd3.tev[pd3.tev.length - 1][1], uhfNow: pd3.uhf[pd3.uhf.length - 1][1] } : {}) },
++      ...(pd3 ? { tev: { [pd3.room]: pd3.tev }, uhf: { [pd3.room]: pd3.uhf }, devLevel: [{ room: pd3.room, ch: '地电波' as const, text: '正常' }, { room: pd3.room, ch: '特高频' as const, text: pd3.uhfLv }] } : {}),
+     }
+   })
+ 
+@@ -165,6 +169,8 @@ export function createSensingMock(x: SensingCtx) {
+       const nv = (v: number | null) => (off ? null : v)
+       return {
+         id: m.id, name: m.name + (gd.meters.length > 1 ? (mi === 0 ? ' · 进线总' : ' · 馈线回路') : ''), ok: m.ok, In,
++        // 演示包（0.13）：两面中压进线柜是二次表，EG 已按 CT 40 · PT 100 换成一次值；其余变比 1
++        ratio: { ...(mv && mi === 0 && ['AH01', 'AH12'].includes(code) ? { ct: 40, pt: 100 } : { ct: 1, pt: 1 }), applied: true },
+         now: {
+           Ua: nv(ua[0]), Ub: nv(ua[1]), Uc: nv(ua[2]), Ia: nv(ia[0]), Ib: nv(ia[1]), Ic: nv(ia[2]), P: nv(last(P)[1]), Q: nv(last(Q)[1]), S: nv(Math.round(last(S)[1]!)),
+           PF: cap ? null : nv(last(PFs!)[1]), F: nv(last(F)[1]), Ep: Math.round(1284567 * share + code.charCodeAt(3) * 9173), EpToday: energy7d[6][1], unbI: nv(unb(ia)), unbU: nv(unb(ua)),
 diff --git a/web/src/api/mock/system.ts b/web/src/api/mock/system.ts
-index cb3d598..2077627 100644
+index cb3d598..de6888d 100644
 --- a/web/src/api/mock/system.ts
 +++ b/web/src/api/mock/system.ts
-@@ -135,7 +135,7 @@ export function createSystemMock(x: SystemCtx) {
+@@ -1,10 +1,11 @@
+ /* Mock：数字底座（台账、资料库、维护记录）与系统管理（北向通道、用户角色、规则阈值、自监控、审计）。
+  * 人的操作（改角色、改阈值、启停规则、加维护记录、上传登记）写 localStorage，并一律记入审计日志。 */
+ import { reactive } from 'vue'
+-import type { AuditEntry, AuditType, CabArchive, Cabinet, DocFile, EdgeRule, LedgerRow, MaintRecord, NorthChannel, NorthMapRow, Point, Role, Sample, SecurityPolicy, SelfMonitor, SeriesOpt, StationRule, ThresholdRow, UserAccount } from '../types'
++import { xlsxLite } from './xlsx-lite'
++import type { AuditEntry, AuditType, CabArchive, Cabinet, DocFile, EdgeRule, LedgerRow, MaintRecord, NorthChannel, NorthMapRow, Point, Role, Sample, SecurityPolicy, SelfMonitor, SeriesOpt, StationRule, ThresholdMeta, ThresholdRow, UserAccount } from '../types'
+ 
+ const MIN = 60e3, H = 3600e3, D = 86400e3
+-const K = { audit: 'lsa9600.audit', user: 'lsa9600.user', roles: 'lsa9600.roles', users: 'lsa9600.users', policy: 'lsa9600.policy', rules: 'lsa9600.ruleOff', th: 'lsa9600.thresholds', docs: 'lsa9600.docs', maint: 'lsa9600.maint', fails: 'lsa9600.loginFails' }
++const K = { audit: 'lsa9600.audit', user: 'lsa9600.user', roles: 'lsa9600.roles', users: 'lsa9600.users', policy: 'lsa9600.policy', rules: 'lsa9600.ruleOff', th: 'lsa9600.thresholds', thMeta: 'lsa9600.thMeta', n104: 'lsa9600.north104', docs: 'lsa9600.docs', maint: 'lsa9600.maint', fails: 'lsa9600.loginFails' }
+ 
+ export interface SystemCtx {
+   NOW: number
+@@ -73,7 +74,13 @@ export function createSystemMock(x: SystemCtx) {
+     { key: 'arc', name: '弧光强度', unit: '', mv: 200, tr: 200, lv: 200, note: '且持续 ≥ 20 ms' }, { key: 'rh', name: '相对湿度上限', unit: '%', mv: 85, tr: 85, lv: 85, note: '' },
+     { key: 'pm', name: '颗粒物倍数', unit: '×', mv: 4, tr: 4, lv: 4, note: '相对基线，细颗粒同向' }, { key: 'ol', name: '过载', unit: '% In', mv: 110, tr: null, lv: 110, note: '持续 5 min' }, { key: 'thdi', name: '电流总谐波畸变', unit: '%', mv: 8, tr: null, lv: 15, note: '用于谐波页限值线（按短路容量折算后填入）' },
+   ]
+-  function listThresholds(): ThresholdRow[] { const o = read<Record<string, number>>(K.th, {}); return defTh.map(r => ({ ...r, mv: o[r.key + '.mv'] ?? r.mv, tr: o[r.key + '.tr'] ?? r.tr, lv: o[r.key + '.lv'] ?? r.lv })) }
++  // 演示包（0.12）：来源与批准。大部分「设计默认 · 已批准（演示）」，弧光按厂家答复、未批准；改值 / 登记批准存浏览器
++  const defMeta = (key: string): ThresholdMeta => key === 'arc'
++    ? { key, source: '厂家答复 70 % ≈ 1 万 lux', rev: 1, changedAt: null, changedBy: null, approvedBy: null, approvedAt: null, approvalDoc: null, approved: false }
++    : { key, source: '设计默认', rev: 1, changedAt: null, changedBy: null, approvedBy: '运维主管（演示）', approvedAt: NOW - 20 * D, approvalDoc: '投运前阈值评审纪要（演示）', approved: true }
++  const metaOf = (key: string): ThresholdMeta => ({ ...defMeta(key), ...read<Record<string, Partial<ThresholdMeta>>>(K.thMeta, {})[key] })
++  const setMeta = (key: string, m: Partial<ThresholdMeta>) => { const all = read<Record<string, Partial<ThresholdMeta>>>(K.thMeta, {}); all[key] = { ...all[key], ...m }; write(K.thMeta, all) }
++  function listThresholds(): ThresholdRow[] { const o = read<Record<string, number>>(K.th, {}); return defTh.map(r => ({ ...r, mv: o[r.key + '.mv'] ?? r.mv, tr: o[r.key + '.tr'] ?? r.tr, lv: o[r.key + '.lv'] ?? r.lv, meta: metaOf(r.key) })) }
+ 
+   /* ---------- 台账、资料库、维护记录 ---------- */
+   const maintOf = (code: string): MaintRecord[] => [...(read<Record<string, MaintRecord[]>>(K.maint, {})[code] ?? []), ...x.getArchive(code).maint]
+@@ -114,8 +121,32 @@ export function createSystemMock(x: SystemCtx) {
+         errors: [{ t: NOW - 9.1 * H, text: 'HTTP 503，重试 3 次后成功；期间积压 3,858 条已补发' }, { t: NOW - 3.2 * D, text: '连接超时 37 分钟（交换机检修），恢复后补发 47,582 条' }],
+         rate24h: x.series(144, 10 * MIN, 1286, 0, 6, { dp: 0 }).map(([t, v]): Sample => [t, t > NOW - 9.2 * H && t < NOW - 8.9 * H ? 0 : v]),
+         backlog24h: x.series(144, 10 * MIN, 0, 0, 0).map(([t]): Sample => { const k = (t - (NOW - 9.2 * H)) / (0.3 * H); return [t, k > 0 && k < 1 ? Math.round(3858 * k) : k >= 1 && k < 1.5 ? Math.round(3858 * (1 - (k - 1) * 2)) : 0] }) },
++      chan104(),
+     ]
+   }
++  /* 演示包（0.14）：IEC 104 通道，缺省未启用；启停 / 改参数存浏览器 */
++  const n104 = () => ({ enabled: false, allow: [] as string[], ca: 1, cyclicS: 60, maxConn: 2, k: 12, w: 8, t1: 15, t2: 10, t3: 20, ...read<Record<string, unknown>>(K.n104, {}) }) as { enabled: boolean; allow: string[]; ca: number; cyclicS: number; maxConn: number; k: number; w: number; t1: number; t2: number; t3: number }
++  function info104(): (string | number)[][] {
++    const head = ['信息体地址（十进制）', '信息体地址（十六进制）', '类型', 'ASDU', '柜号', '柜名', '设备', '测点 key', '名称', '单位', '小数位', '变化死区']
++    const hex = (n: number) => '0x' + n.toString(16).toUpperCase().padStart(4, '0')
++    const out: (string | number)[][] = [head]
++    x.cabs.forEach((c, i) => {
++      const b = i + 1
++      ;['柜告警总（未确认）', 'EG 通信中断', '弧光事件', '过温告警'].forEach((d, bit) => { const ioa = 0x0001 + b * 32 + bit; out.push([ioa, hex(ioa), '遥信', 'M_SP_NA_1（总召）/ M_SP_TB_1（变位）', c.code, c.name, 'EG-' + c.code, 'yx' + bit, d, '', '', '']) })
++      x.listPoints(c.code).forEach((p, idx) => { const ioa = 0x4001 + b * 128 + idx; out.push([ioa, hex(ioa), '遥测', 'M_ME_NC_1（总召 / 周期）/ M_ME_TF_1（变化）', c.code, c.name, p.dev, p.key, p.desc, p.unit, p.dp, '1 %']) })
++    })
++    return out
++  }
++  function chan104(): NorthChannel {
++    const c = n104(), rows = info104().slice(1), nYx = rows.filter(r => r[2] === '遥信').length
++    return { id: 'iec104', enabled: c.enabled, name: '电力监控系统（IEC 104）', proto: 'IEC 60870-5-104', role: '本机为从站（被控站），主站来连', endpoint: `0.0.0.0:2404 · 公共地址 ${c.ca}`,
++      peer: c.allow.length ? `${c.allow.join('、')}（尚未连接）` : '白名单为空（全部拒绝）', state: c.enabled ? 'down' : 'off', since: NOW - 3 * D, everOk: false, peerSet: c.allow.length > 0,
++      points: rows.length, perMin: 0, okPct: null, latency: null, backlog: 0, lastOk: null,
++      params: [['监听地址', '0.0.0.0:2404'], ['公共地址', String(c.ca)], ['允许主站', c.allow.length ? c.allow.join('、') : '空 = 全部拒绝（投运前必须填）'], ['连接', `最多 ${c.maxConn} 条，同一时刻只有 1 条 STARTDT（主备）`],
++        ['k / w', `${c.k} / ${c.w}`], ['t1 / t2 / t3', `${c.t1} / ${c.t2} / ${c.t3} s`], ['上送', `总召唤；变化上送（带时标，时标 = 测点自己的时间）；周期 ${c.cyclicS ? `${c.cyclicS} s` : '关'}`],
++        ['信息点', `遥信 ${nYx} · 遥测 ${rows.length - nYx}（导出《104 信息点表》）`], ['品质', '能力未确认 / 没装 IV；失联 / 过期 NT；维护屏蔽的遥信 BL'], ['对时', '只记录，不改子站时钟（时间以站内时钟源为准）'], ['控制命令', '一律否定确认、不执行，记审计（不做遥控）']],
++      errors: [], rate24h: x.series(144, 10 * MIN, 0, 0, 0).map(([t]): Sample => [t, null]), backlog24h: x.series(144, 10 * MIN, 0, 0, 0).map(([t]): Sample => [t, null]) }
++  }
+   function listNorthMap(): NorthMapRow[] {
+     let addr = 0
+     return x.cabs.slice(0, 6).flatMap(c => x.listPoints(c.code).filter(p => /ir\.t_max|ir\.rise|us\.amp|uv\.int|env\.rh|el\.I[abc]|el\.P$/.test(p.key)).map((p): NorthMapRow => {
+@@ -135,7 +166,7 @@ export function createSystemMock(x: SystemCtx) {
        services: ([['ThingsBoard Core', '设备接入、规则链、遥测', 'ok', 18, 3.6], ['PostgreSQL + TimescaleDB', '关系库与时序库', 'ok', 9, 6.2], ['Kafka（KRaft）', '消息队列', 'ok', 4, 1.8], ['Valkey', '缓存', 'ok', 1, 0.4],
          ['业务服务 biz', '健康度、温升分析、巡检', 'ok', 6, 1.1], ['北向服务 northbound', 'Modbus TCP / HTTP 上送', 'ok', 2, 0.5], ['流媒体 ZLMediaKit', '双光视频转发', 'warn', 11, 0.9], ['Nginx', '前端与反向代理', 'ok', 0, 0.1], ['chrony', '对时', 'ok', 0, 0.02], ['NUT', 'UPS 监视', 'ok', 0, 0.02]] as [string, string, 'ok' | 'warn', number, number][])
          .map(([name, desc, state, cpu, mem]) => ({ name, desc, state, cpu, mem, uptime: name.startsWith('流媒体') ? '2 小时（自动重启 1 次）' : '41 天' })),
@@ -52,3 +257,77 @@ index cb3d598..2077627 100644
        backup: { schedule: '每日 01:30 全量 · 每小时增量（pgBackRest）', last: lastBk, lastSize: '3.8 GB', lastOk: true, target: 'HDD /backup，保留 30 天',
          history: Array.from({ length: 6 }, (_, i) => ({ t: lastBk - i * D, size: (3.8 - i * 0.01).toFixed(2) + ' GB', ok: i !== 4, kind: '全量' })) },
      }
+@@ -152,7 +183,18 @@ export function createSystemMock(x: SystemCtx) {
+       getPolicy: () => ({ ...defPolicy, ...read<Partial<SecurityPolicy>>(K.policy, {}) }),
+       savePolicy(p: SecurityPolicy, reason: string) { write(K.policy, p); audit('配置变更', '安全策略', `更新口令与会话策略；原因：${reason}`) },
+       toggleRule(id: string, on: boolean, reason: string) { const off = read<string[]>(K.rules, []).filter(v => v !== id); if (!on) off.push(id); write(K.rules, off); const r = listStationRules().find(v => v.id === id); audit(r?.where === 'EG' ? '下发' : '配置变更', '规则 ' + (r?.name ?? id), `${on ? '启用' : '停用'}；原因：${reason}`) },
+-      saveThreshold(key: string, col: 'mv' | 'tr' | 'lv', v: number, reason: string) { const o = read<Record<string, number>>(K.th, {}), row = listThresholds().find(r => r.key === key)!; const old = row[col]; o[`${key}.${col}`] = v; write(K.th, o); audit('下发', '阈值模板', `${({ mv: '中压柜', tr: '变压器', lv: '低压柜' })[col]} ${row.name} ${old} → ${v} ${row.unit}；原因：${reason}`) },
++      saveThreshold(key: string, col: 'mv' | 'tr' | 'lv', v: number, reason: string) { const o = read<Record<string, number>>(K.th, {}), row = listThresholds().find(r => r.key === key)!; const old = row[col]; o[`${key}.${col}`] = v; write(K.th, o); const m = metaOf(key); setMeta(key, { rev: m.rev + 1, changedAt: Date.now(), changedBy: currentUser()?.name ?? '—', approved: false }); audit('下发', '阈值模板', `${({ mv: '中压柜', tr: '变压器', lv: '低压柜' })[col]} ${row.name} ${old} → ${v} ${row.unit}；原因：${reason}`) },
++      approveThreshold(key: string, by: string, doc: string) { const row = defTh.find(r => r.key === key)!; setMeta(key, { approved: true, approvedBy: by, approvedAt: Date.now(), approvalDoc: doc }); audit('配置变更', '阈值模板', `登记批准：${row.name} 第 ${metaOf(key).rev} 版，批准人 ${by}，依据 ${doc}`) },
++      setNorth(id: string, patch: { enabled?: boolean; cfg?: Record<string, unknown> }, reason: string) {
++        if (id !== 'iec104') throw new Error('模拟数据下只能改 IEC 104')
++        const c = n104(); if (patch.enabled !== undefined) c.enabled = patch.enabled; if (patch.cfg) Object.assign(c, patch.cfg); write(K.n104, c)
++        audit('配置变更', '北向通道', `IEC 104 ${patch.enabled === undefined ? '修改参数' : patch.enabled ? '启用' : '停用'}（演示）；原因：${reason}`)
++      },
++      iec104Map(fmt: 'csv' | 'xlsx'): Blob {
++        const rows = info104()
++        if (fmt === 'csv') return new Blob(['\ufeff' + rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' })
++        return xlsxLite([{ name: '104信息点表', rows }, { name: '说明', head: false, rows: [['LSA-9600SP 子站 · IEC 60870-5-104 从站信息点表（演示包生成，点位按模拟数据）'], [''], ['公共地址：整站一个（缺省 1）。信息体地址 3 字节。遥信 0x0001 起、遥测 0x4001 起，按柜分块，加柜加点不挪已有地址。'], ['品质位：IV = 能力未确认 / 没装；NT = 网关失联或数据过期；BL = 维护屏蔽中。'], ['控制方向：不做任何遥控 / 设点 —— 一切控制命令否定确认、不执行，并记审计。']] }])
++      },
+       runBackup() { localStorage.setItem('lsa9600.backupAt', String(Date.now())); audit('备份', '数据库', '手动触发全量备份，完成 3.8 GB') },
+       listAudit: () => auditLog, audit,
+       login(name: string, password: string): string | null {
+diff --git a/web/src/api/mock/xlsx-lite.ts b/web/src/api/mock/xlsx-lite.ts
+new file mode 100644
+index 0000000..f76f258
+--- /dev/null
++++ b/web/src/api/mock/xlsx-lite.ts
+@@ -0,0 +1,48 @@
++/* 演示包：最小 XLSX 生成（不压缩的 zip + inlineStr 单元格），只给 Mock 导出《104 信息点表》用；真后端用 exceljs 生成 */
++const enc = new TextEncoder()
++const CRC = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0 })
++const crc32 = (b: Uint8Array) => { let c = 0xffffffff; for (const x of b) c = CRC[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0 }
++const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
++const col = (i: number) => { let s = ''; for (i++; i; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + ((i - 1) % 26)) + s; return s }
++
++function sheet(rows: (string | number)[][], bold = true): string {
++  const body = rows.map((r, ri) => `<row r="${ri + 1}">${r.map((v, ci) => {
++    const ref = col(ci) + (ri + 1), st = bold && ri === 0 ? ' s="1"' : ''
++    return typeof v === 'number' ? `<c r="${ref}"${st}><v>${v}</v></c>` : `<c r="${ref}" t="inlineStr"${st}><is><t xml:space="preserve">${esc(v)}</t></is></c>`
++  }).join('')}</row>`).join('')
++  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${body}</sheetData></worksheet>`
++}
++
++function zip(files: [string, string][]): Blob {
++  const parts: Uint8Array[] = [], central: Uint8Array[] = []
++  let off = 0
++  for (const [name, text] of files) {
++    const n = enc.encode(name), d = enc.encode(text), crc = crc32(d)
++    const h = new DataView(new ArrayBuffer(30))
++    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, 0, true); h.setUint16(12, 0x21, true)
++    h.setUint32(14, crc, true); h.setUint32(18, d.length, true); h.setUint32(22, d.length, true); h.setUint16(26, n.length, true)
++    const c = new DataView(new ArrayBuffer(46))
++    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint16(14, 0x21, true)
++    c.setUint32(16, crc, true); c.setUint32(20, d.length, true); c.setUint32(24, d.length, true); c.setUint16(28, n.length, true); c.setUint32(42, off, true)
++    parts.push(new Uint8Array(h.buffer), n, d)
++    central.push(new Uint8Array(c.buffer), n)
++    off += 30 + n.length + d.length
++  }
++  const size = central.reduce((s, b) => s + b.length, 0)
++  const e = new DataView(new ArrayBuffer(22))
++  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, size, true); e.setUint32(16, off, true)
++  return new Blob([...parts, ...central, new Uint8Array(e.buffer)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
++}
++
++/** 多个工作表 → XLSX Blob；每张表第一行加粗 */
++export function xlsxLite(sheets: { name: string; rows: (string | number)[][]; head?: boolean }[]): Blob {
++  const S = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
++  return zip([
++    ['[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>`],
++    ['_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${S}/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
++    ['xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="${S}"><sheets>${sheets.map((s, i) => `<sheet name="${esc(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>`],
++    ['xl/_rels/workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="${S}/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}<Relationship Id="rId${sheets.length + 1}" Type="${S}/styles" Target="styles.xml"/></Relationships>`],
++    ['xl/styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`],
++    ...sheets.map((s, i): [string, string] => [`xl/worksheets/sheet${i + 1}.xml`, sheet(s.rows, s.head !== false)]),
++  ])
++}
