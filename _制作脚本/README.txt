@@ -9,4 +9,4 @@ EG：  起一个带新接口的 agent（开发机旁观实例 9101 或正常 age
       再 node inline.mjs dist <演示包>/EG
 检查：node demo-check.mjs（无头 Edge：证据回放、抓帧、事件关联录像、子站跳 EG、各页无脚本错误）
 本次：子站 26b0a70（0.14；构建时 FRONTEND_REV=26b0a70，补丁另含 mock 的配置 NA 与对时 mode，并补齐 0.10–0.14 新显示的演示值：
-      阈值来源 / 批准、IEC 104 通道与信息点表导出（新增 mock/xlsx-lite.ts）、电表变比、地电波 / 特高频、告警代码、试行规则 trial-1、能力「在等」），EG b7b1ef2（界面与 bee14c9 相同）
+      阈值来源 / 批准、IEC 104 通道与信息点表导出（新增 mock/xlsx-lite.ts）、电表变比、地电波 / 特高频、告警代码、试行规则 trial-1、能力「在等」；左下角改「演示版」、提示文字改演示口径），EG b7b1ef2（界面与 bee14c9 相同）

@@ -1,5 +1,5 @@
 diff --git a/web/src/api/mock/adapter.ts b/web/src/api/mock/adapter.ts
-index d476dab..61eaa5d 100644
+index d476dab..b585574 100644
 --- a/web/src/api/mock/adapter.ts
 +++ b/web/src/api/mock/adapter.ts
 @@ -2,7 +2,7 @@
@@ -35,6 +35,17 @@ index d476dab..61eaa5d 100644
    if (mixed) cabBy('AH03')!.load = 71 // 与过温告警描述一致
    // 同一条供电链路负荷率一致：出线柜 → 变压器 → 低压进线（低压侧略低，差值为变压器损耗）
    ;([['AH03', 'T1', 'AA01'], ['AH08', 'T2', 'AA07']] as const).forEach(([fd, tr, lv]) => { const l = cabBy(fd)!.load; cabBy(tr)!.load = l; cabBy(lv)!.load = l == null ? null : l - 1 })
+@@ -267,8 +277,8 @@ export function createMockApi(scn: Scenario): Api {
+     ackAlarms: async (ids: string[], note: string) => { alarmMock.api.ackAlarms(ids, note); return { done: ids, failed: [] } },
+     // 维护屏蔽（阶段 A9）：Mock 不做
+     listAlarmMasks: async () => [],
+-    addAlarmMask: async () => { throw new Error('模拟数据下不能设维护屏蔽，接真后端（?api=tb）后可用') },
+-    cancelAlarmMask: async () => { throw new Error('模拟数据下没有维护屏蔽') },
++    addAlarmMask: async () => { throw new Error('演示版不执行此操作（维护屏蔽要在现场系统里设）') },
++    cancelAlarmMask: async () => { throw new Error('演示版没有维护屏蔽可取消') },
+     now: () => NOW,
+     station: () => ({ name: '1# 配电室', voltage: '10kV / 0.4kV', commissioned: '2024-02-19' }),
+     /** Mock 的巡检：前端逐柜算，每柜间隔 420 ms 呈现进度（真后端由服务端推送） */
 @@ -281,7 +291,7 @@ export function createMockApi(scn: Scenario): Api {
          onCab(r)
        }
@@ -61,14 +72,15 @@ index d476dab..61eaa5d 100644
        e.svcReason = disabled ? reason : null
        e.svcBy = disabled ? '演示用户' : null
        e.svcAt = disabled ? Date.now() : null
-@@ -332,15 +345,17 @@ export function createMockApi(scn: Scenario): Api {
+@@ -332,16 +345,18 @@ export function createMockApi(scn: Scenario): Api {
      // 能力（阶段 A1）：Mock 是演示口径，全部已确认，不能改
      getCapabilities: (code: string) => ({
        cab: code, mode: 'demo' as const, actualAt: null, site: null,
 -      rows: (Object.keys(CAP_LABEL) as CapKey[]).map(key => ({ key, label: CAP_LABEL[key], state: 'confirmed' as const, source: 'model' as const, model: 'confirmed' as const, actual: null, mismatch: null })),
 +      rows: (Object.keys(CAP_LABEL) as CapKey[]).map(key => ({ key, label: CAP_LABEL[key], state: capOf(code, key), source: 'model' as const, model: capOf(code, key), actual: null, mismatch: null, pending: CAP_WAIT[code]?.[0] === key ? CAP_WAIT[code][1] : null })),
      }),
-     setCapabilities: async () => { throw new Error('模拟数据下不能改能力，接真后端（?api=tb）后可用') },
+-    setCapabilities: async () => { throw new Error('模拟数据下不能改能力，接真后端（?api=tb）后可用') },
++    setCapabilities: async () => { throw new Error('演示版不执行此操作（能力清单要在现场系统里改）') },
      // Mock 没有真实的 EG
 -    egPortal: async () => { throw new Error('模拟数据下没有真实的 EG，接真后端（?api=tb）后可用') },
 +    // 演示包：打开同目录下的 EG 管理页演示版（../EG/），带上柜号与柜名
@@ -77,11 +89,13 @@ index d476dab..61eaa5d 100644
      listPoints, subscribePoints, listOutages, listSouthStats, listEvents, series, random: R,
      // Mock 没有抓拍图（界面画示意）
 -    blob: async () => { throw new Error('Mock 没有图片') },
+-    evidenceUrl: async () => { throw new Error('Mock 没有证据文件') },
 +    // 演示包：《104 信息点表》XLSX / CSV 在浏览器里现生成
-+    blob: async (url: string) => { if (url.startsWith('/ext/north/iec104-map')) return system.api.iec104Map(url.includes('format=csv') ? 'csv' : 'xlsx'); throw new Error('Mock 没有图片') },
-     evidenceUrl: async () => { throw new Error('Mock 没有证据文件') },
++    blob: async (url: string) => { if (url.startsWith('/ext/north/iec104-map')) return system.api.iec104Map(url.includes('format=csv') ? 'csv' : 'xlsx'); throw new Error('演示版没有这张图片') },
++    evidenceUrl: async () => { throw new Error('演示版没有证据文件') },
      archiveEvidence: async (id: string) => ({ evidenceId: id, status: 'UPLOADED' }),
      lockEvidence: async () => ({ requestId: 'mock', status: 'ACCEPTED', evidenceIds: [] }),
+   }
 @@ -358,7 +373,7 @@ export function createMockApi(scn: Scenario): Api {
  export const ASYNC_METHODS = [
    'getAlarmEvidence', 'listSoe', 'getAlarmStats', 'getTrend', 'saveInspection', 'listInspections', 'getInspectPlan', 'setInspectPlan',
@@ -183,7 +197,7 @@ index b9d105b..abf0b29 100644
            Ua: nv(ua[0]), Ub: nv(ua[1]), Uc: nv(ua[2]), Ia: nv(ia[0]), Ib: nv(ia[1]), Ic: nv(ia[2]), P: nv(last(P)[1]), Q: nv(last(Q)[1]), S: nv(Math.round(last(S)[1]!)),
            PF: cap ? null : nv(last(PFs!)[1]), F: nv(last(F)[1]), Ep: Math.round(1284567 * share + code.charCodeAt(3) * 9173), EpToday: energy7d[6][1], unbI: nv(unb(ia)), unbU: nv(unb(ua)),
 diff --git a/web/src/api/mock/system.ts b/web/src/api/mock/system.ts
-index cb3d598..de6888d 100644
+index cb3d598..7badd51 100644
 --- a/web/src/api/mock/system.ts
 +++ b/web/src/api/mock/system.ts
 @@ -1,10 +1,11 @@
@@ -265,14 +279,14 @@ index cb3d598..de6888d 100644
 +      saveThreshold(key: string, col: 'mv' | 'tr' | 'lv', v: number, reason: string) { const o = read<Record<string, number>>(K.th, {}), row = listThresholds().find(r => r.key === key)!; const old = row[col]; o[`${key}.${col}`] = v; write(K.th, o); const m = metaOf(key); setMeta(key, { rev: m.rev + 1, changedAt: Date.now(), changedBy: currentUser()?.name ?? '—', approved: false }); audit('下发', '阈值模板', `${({ mv: '中压柜', tr: '变压器', lv: '低压柜' })[col]} ${row.name} ${old} → ${v} ${row.unit}；原因：${reason}`) },
 +      approveThreshold(key: string, by: string, doc: string) { const row = defTh.find(r => r.key === key)!; setMeta(key, { approved: true, approvedBy: by, approvedAt: Date.now(), approvalDoc: doc }); audit('配置变更', '阈值模板', `登记批准：${row.name} 第 ${metaOf(key).rev} 版，批准人 ${by}，依据 ${doc}`) },
 +      setNorth(id: string, patch: { enabled?: boolean; cfg?: Record<string, unknown> }, reason: string) {
-+        if (id !== 'iec104') throw new Error('模拟数据下只能改 IEC 104')
++        if (id !== 'iec104') throw new Error('演示版不执行此操作')
 +        const c = n104(); if (patch.enabled !== undefined) c.enabled = patch.enabled; if (patch.cfg) Object.assign(c, patch.cfg); write(K.n104, c)
 +        audit('配置变更', '北向通道', `IEC 104 ${patch.enabled === undefined ? '修改参数' : patch.enabled ? '启用' : '停用'}（演示）；原因：${reason}`)
 +      },
 +      iec104Map(fmt: 'csv' | 'xlsx'): Blob {
 +        const rows = info104()
 +        if (fmt === 'csv') return new Blob(['\ufeff' + rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' })
-+        return xlsxLite([{ name: '104信息点表', rows }, { name: '说明', head: false, rows: [['LSA-9600SP 子站 · IEC 60870-5-104 从站信息点表（演示包生成，点位按模拟数据）'], [''], ['公共地址：整站一个（缺省 1）。信息体地址 3 字节。遥信 0x0001 起、遥测 0x4001 起，按柜分块，加柜加点不挪已有地址。'], ['品质位：IV = 能力未确认 / 没装；NT = 网关失联或数据过期；BL = 维护屏蔽中。'], ['控制方向：不做任何遥控 / 设点 —— 一切控制命令否定确认、不执行，并记审计。']] }])
++        return xlsxLite([{ name: '104信息点表', rows }, { name: '说明', head: false, rows: [['LSA-9600SP 子站 · IEC 60870-5-104 从站信息点表（演示版生成，点位为演示数据）'], [''], ['公共地址：整站一个（缺省 1）。信息体地址 3 字节。遥信 0x0001 起、遥测 0x4001 起，按柜分块，加柜加点不挪已有地址。'], ['品质位：IV = 能力未确认 / 没装；NT = 网关失联或数据过期；BL = 维护屏蔽中。'], ['控制方向：不做任何遥控 / 设点 —— 一切控制命令否定确认、不执行，并记审计。']] }])
 +      },
        runBackup() { localStorage.setItem('lsa9600.backupAt', String(Date.now())); audit('备份', '数据库', '手动触发全量备份，完成 3.8 GB') },
        listAudit: () => auditLog, audit,
@@ -331,3 +345,29 @@ index 0000000..f76f258
 +    ...sheets.map((s, i): [string, string] => [`xl/worksheets/sheet${i + 1}.xml`, sheet(s.rows, s.head !== false)]),
 +  ])
 +}
+diff --git a/web/src/components/kit/DualLightPlayer.vue b/web/src/components/kit/DualLightPlayer.vue
+index 63aa793..8632d1d 100644
+--- a/web/src/components/kit/DualLightPlayer.vue
++++ b/web/src/components/kit/DualLightPlayer.vue
+@@ -202,7 +202,7 @@ defineExpose({ capture })
+         <span class="tmax">MAX {{ tmax ?? '--' }}℃</span><span class="cap">{{ mode === 'fusion' ? '融合 · ' : '' }}{{ thermalCap }}</span>
+       </div>
+     </template>
+-    <span v-if="demo" class="demo" title="没有接入视频流（Mock 数据或 SAM 未接入），画面是示意图，不是实况">示意</span>
++    <span v-if="demo" class="demo" title="演示版没有接入视频流（或 SAM 未接入），画面是示意图，不是实况">示意</span>
+     <div v-if="offline" class="nosig" style="inset:0">{{ offlineText ?? '网关离线 · 无实时画面' }}</div>
+   </div>
+ </template>
+diff --git a/web/src/layouts/ShellWork.vue b/web/src/layouts/ShellWork.vue
+index b4d789a..7dcec66 100644
+--- a/web/src/layouts/ShellWork.vue
++++ b/web/src/layouts/ShellWork.vue
+@@ -69,7 +69,7 @@ initAlarmNotify(go)
+           </div>
+         </div>
+       </nav>
+-      <div class="side-foot" :title="`前端构建 ${BUILD.rev || '—'} · ${BUILD.builtAt || '—'}`">{{ api.backend === 'mock' ? 'Mock 数据' : (appVer ? 'v' + appVer : '子站后端') }} · 前端 {{ BUILD.rev || 'dev' }}</div>
++      <div class="side-foot" :title="`前端构建 ${BUILD.rev || '—'} · ${BUILD.builtAt || '—'}`">{{ api.backend === 'mock' ? '演示版' : (appVer ? 'v' + appVer : '子站后端') }} · 前端 {{ BUILD.rev || 'dev' }}</div>
+     </aside>
+     <div class="main">
+       <TopBar />
